@@ -1,53 +1,76 @@
 import tensorflow as tf
 from dis_model_dns import DIS
-import cPickle
+import pickle
 import numpy as np
 import multiprocessing
+import pandas as pd
+import os
 
 cores = multiprocessing.cpu_count()
 
 #########################################################################################
+# Data source
+#########################################################################################
+model_name = 'IRGAN'
+ds_root = '/content/drive/MyDrive/recommender_datasets/datasets'
+pred_root = '/content/drive/MyDrive/recommender_datasets/model_predictions'
+ds_name = 'Amazon-video-games'
+fold = 1
+
+train_df = pd.read_csv('{}/{}/train_df_{}.csv'.format(ds_root, ds_name, fold))
+test_df = pd.read_csv('{}/{}/test_df_{}.csv'.format(ds_root, ds_name, fold))
+ratings_df = pd.concat([train_df, test_df])
+
+n_users = len(ratings_df.user.unique())
+n_items = len(ratings_df.item.unique())
+
+d = "{}/{}/{}/fold-{}/".format(pred_root, model_name, ds_name, fold)
+os.makedirs(d, exist_ok=True)
+#########################################################################################
 # Hyper-parameters
 #########################################################################################
 EMB_DIM = 5
-USER_NUM = 943
-ITEM_NUM = 1683
+USER_NUM = n_users
+ITEM_NUM = n_items
 DNS_K = 5
 all_items = set(range(ITEM_NUM))
-workdir = 'ml-100k/'
+workdir = d
 DIS_TRAIN_FILE = workdir + 'dis-train.txt'
 DIS_MODEL_FILE = workdir + "model_dns.pkl"
 #########################################################################################
 # Load data
 #########################################################################################
 user_pos_train = {}
-with open(workdir + 'movielens-100k-train.txt')as fin:
+with open('{}/{}/train_df_{}.csv'.format(ds_root, ds_name, fold))as fin:
+    next(fin)
     for line in fin:
-        line = line.split()
+        line = line.split(",")
         uid = int(line[0])
         iid = int(line[1])
         r = float(line[2])
-        if r > 3.99:
+        if r > 0:
             if uid in user_pos_train:
                 user_pos_train[uid].append(iid)
             else:
                 user_pos_train[uid] = [iid]
-
+print(user_pos_train)
 user_pos_test = {}
-with open(workdir + 'movielens-100k-test.txt')as fin:
+with open('{}/{}/test_df_{}.csv'.format(ds_root, ds_name, fold))as fin:
+    next(fin)
     for line in fin:
-        line = line.split()
+        line = line.split(',')
         uid = int(line[0])
         iid = int(line[1])
         r = float(line[2])
-        if r > 3.99:
+        if r > 0:
             if uid in user_pos_test:
                 user_pos_test[uid].append(iid)
             else:
                 user_pos_test[uid] = [iid]
 
 all_users = user_pos_train.keys()
-all_users.sort()
+# all_users.sort()
+sorted(all_users)
 
 
 def generate_dns(sess, model, filename):
@@ -117,7 +140,7 @@ def simple_test(sess, model):
     result = np.array([0.] * 6)
     pool = multiprocessing.Pool(cores)
     batch_size = 128
-    test_users = user_pos_test.keys()
+    test_users = list(user_pos_test.keys())
     test_user_num = len(test_users)
     index = 0
     while True:
@@ -140,7 +163,7 @@ def simple_test(sess, model):
 
 def generate_uniform(filename):
     data = []
-    print 'uniform negative sampling...'
+    print('uniform negative sampling...')
     for u in user_pos_train:
         pos = user_pos_train[u]
         candidates = list(all_items - set(pos))
@@ -165,7 +188,7 @@ def main():
     sess.run(tf.global_variables_initializer())
 
     dis_log = open(workdir + 'dis_log_dns.txt', 'w')
-    print "dis ", simple_test(sess, discriminator)
+    print("dis ", simple_test(sess, discriminator))
     best_p5 = 0.
 
     # generate_uniform(DIS_TRAIN_FILE) # Uniformly sample negative examples
@@ -183,11 +206,11 @@ def main():
                                         discriminator.neg: [j]})
 
         result = simple_test(sess, discriminator)
-        print "epoch ", epoch, "dis: ", result
+        print("epoch ", epoch, "dis: ", result)
         if result[1] > best_p5:
             best_p5 = result[1]
             discriminator.save_model(sess, DIS_MODEL_FILE)
-            print "best P@5: ", best_p5
+            print("best P@5: ", best_p5)
 
         buf = '\t'.join([str(x) for x in result])
         dis_log.write(str(epoch) + '\t' + buf + '\n')

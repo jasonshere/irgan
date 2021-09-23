@@ -1,5 +1,5 @@
 import tensorflow as tf
-import cPickle
+import pickle
 
 
 class DIS():
@@ -64,4 +64,4 @@ class DIS():
 
     def save_model(self, sess, filename):
         param = sess.run(self.d_params)
-        cPickle.dump(param, open(filename, 'w'))
+        pickle.dump(param, open(filename, 'wb'))

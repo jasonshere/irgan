@@ -1,7 +1,7 @@
 import tensorflow as tf
 from dis_model import DIS
 from gen_model import GEN
-import cPickle
+import pickle
 import numpy as np
 import utils as ut
 import multiprocessing
@@ -9,49 +9,70 @@ import multiprocessing
 cores = multiprocessing.cpu_count()
 
 #########################################################################################
+# Data source
+#########################################################################################
+model_name = 'IRGAN'
+ds_root = '/content/drive/MyDrive/recommender_datasets/datasets'
+pred_root = '/content/drive/MyDrive/recommender_datasets/model_predictions'
+ds_name = 'Amazon-video-games'
+fold = 1
+
+train_df = pd.read_csv('{}/{}/train_df_{}.csv'.format(ds_root, ds_name, fold))
+test_df = pd.read_csv('{}/{}/test_df_{}.csv'.format(ds_root, ds_name, fold))
+ratings_df = pd.concat([train_df, test_df])
+
+n_users = len(ratings_df.user.unique())
+n_items = len(ratings_df.item.unique())
+
+d = "{}/{}/{}/fold-{}/".format(pred_root, model_name, ds_name, fold)
+os.makedirs(d, exist_ok=True)
+
+#########################################################################################
 # Hyper-parameters
 #########################################################################################
 EMB_DIM = 5
-USER_NUM = 943
-ITEM_NUM = 1683
+USER_NUM = n_users
+ITEM_NUM = n_items
 BATCH_SIZE = 16
 INIT_DELTA = 0.05
 
 all_items = set(range(ITEM_NUM))
-workdir = 'ml-100k/'
+workdir = d
 DIS_TRAIN_FILE = workdir + 'dis-train.txt'
-
 #########################################################################################
 # Load data
 #########################################################################################
 user_pos_train = {}
-with open(workdir + 'movielens-100k-train.txt')as fin:
+with open('{}/{}/train_df_{}.csv'.format(ds_root, ds_name, fold))as fin:
+    next(fin)
     for line in fin:
-        line = line.split()
+        line = line.split(",")
         uid = int(line[0])
         iid = int(line[1])
         r = float(line[2])
-        if r > 3.99:
+        if r > 0:
             if uid in user_pos_train:
                 user_pos_train[uid].append(iid)
             else:
                 user_pos_train[uid] = [iid]
-
+print(user_pos_train)
 user_pos_test = {}
-with open(workdir + 'movielens-100k-test.txt')as fin:
+with open('{}/{}/test_df_{}.csv'.format(ds_root, ds_name, fold))as fin:
+    next(fin)
     for line in fin:
-        line = line.split()
+        line = line.split(',')
         uid = int(line[0])
         iid = int(line[1])
         r = float(line[2])
-        if r > 3.99:
+        if r > 0:
             if uid in user_pos_test:
                 user_pos_test[uid].append(iid)
             else:
                 user_pos_test[uid] = [iid]
 
 all_users = user_pos_train.keys()
-all_users.sort()
+# all_users.sort()
+sorted(all_users)
 
 
 def dcg_at_k(r, k):
@@ -100,7 +121,7 @@ def simple_test(sess, model):
     result = np.array([0.] * 6)
     pool = multiprocessing.Pool(cores)
     batch_size = 128
-    test_users = user_pos_test.keys()
+    test_users = list(user_pos_test.keys())
     test_user_num = len(test_users)
     index = 0
     while True:
@@ -140,8 +161,8 @@ def generate_for_d(sess, model, filename):
 
 
 def main():
-    print "load model..."
-    param = cPickle.load(open(workdir + "model_dns_ori.pkl"))
+    print("load model...")
+    param = pickle.load(open(workdir + "model_dns_ori.pkl", "rb"), encoding='latin1')
     generator = GEN(ITEM_NUM, USER_NUM, EMB_DIM, lamda=0.0 / BATCH_SIZE, param=param, initdelta=INIT_DELTA,
                     learning_rate=0.001)
     discriminator = DIS(ITEM_NUM, USER_NUM, EMB_DIM, lamda=0.1 / BATCH_SIZE, param=None, initdelta=INIT_DELTA,
@@ -152,8 +173,8 @@ def main():
     sess = tf.Session(config=config)
     sess.run(tf.global_variables_initializer())
 
-    print "gen ", simple_test(sess, generator)
-    print "dis ", simple_test(sess, discriminator)
+    print("gen ", simple_test(sess, generator))
+    print("dis ", simple_test(sess, discriminator))
 
     dis_log = open(workdir + 'dis_log.txt', 'w')
     gen_log = open(workdir + 'gen_log.txt', 'w')
@@ -208,19 +229,26 @@ def main():
                                  {generator.u: u, generator.i: sample, generator.reward: reward})
 
                 result = simple_test(sess, generator)
-                print "epoch ", epoch, "gen: ", result
+                print("epoch ", epoch, "gen: ", result)
                 buf = '\t'.join([str(x) for x in result])
                 gen_log.write(str(epoch) + '\t' + buf + '\n')
                 gen_log.flush()
 
                 p_5 = result[1]
                 if p_5 > best:
-                    print 'best: ', result
+                    print('best: ', result)
                     best = p_5
-                    generator.save_model(sess, "ml-100k/gan_generator.pkl")
+                    # generator.save_model(sess, "ml-100k/gan_generator.pkl")
+
 
     gen_log.close()
     dis_log.close()
+    # save predictions
+    users = np.arange(n_users)
+    predictions = generator.predict(users, None)
+    pd.DataFrame(predictions).to_csv("{}/predictions.csv".format(d), index=False)
+    # pd.DataFrame(dataset.train_matrix.toarray()).to_csv("{}/train.csv".format(d), index=False)
+    # pd.DataFrame(dataset.test_matrix.toarray()).to_csv("{}/test.csv".format(d), index=False)
 
 
 if __name__ == '__main__':

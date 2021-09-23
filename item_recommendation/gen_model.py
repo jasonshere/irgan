@@ -1,5 +1,5 @@
 import tensorflow as tf
-import cPickle
+import pickle
 
 
 class GEN():
@@ -54,4 +54,14 @@ class GEN():
 
     def save_model(self, sess, filename):
         param = sess.run(self.g_params)
-        cPickle.dump(param, open(filename, 'w'))
+        pickle.dump(param, open(filename, 'wb'))
+
+    def predict(self, users, items):
+        user_embedding = self.u_embedding[users]
+        item_embedding = self.i_embedding
+        item_bias = self.i_bias
+
+        all_ratings = np.matmul(user_embedding, item_embedding.T) + item_bias
+        if items is not None:
+            all_ratings = [all_ratings[idx][item] for idx, item in enumerate(items)]
+        return all_ratings
