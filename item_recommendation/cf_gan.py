@@ -5,6 +5,9 @@ import pickle
 import numpy as np
 import utils as ut
 import multiprocessing
+import os
+import pandas as pd
+from scipy.special import expit
 
 cores = multiprocessing.cpu_count()
 
@@ -149,8 +152,11 @@ def generate_for_d(sess, model, filename):
 
         rating = sess.run(model.all_rating, {model.u: [u]})
         rating = np.array(rating[0]) / 0.2  # Temperature
-        exp_rating = np.exp(rating)
+        # exp_rating = np.exp(rating)
+        exp_rating = expit(rating)
+        # print(exp_rating)
         prob = exp_rating / np.sum(exp_rating)
+        # print(prob)
 
         neg = np.random.choice(np.arange(ITEM_NUM), size=len(pos), p=prob)
         for i in range(len(pos)):
@@ -162,11 +168,11 @@ def generate_for_d(sess, model, filename):
 
 def main():
     print("load model...")
-    param = pickle.load(open(workdir + "model_dns_ori.pkl", "rb"), encoding='latin1')
-    generator = GEN(ITEM_NUM, USER_NUM, EMB_DIM, lamda=0.0 / BATCH_SIZE, param=param, initdelta=INIT_DELTA,
-                    learning_rate=0.001)
-    discriminator = DIS(ITEM_NUM, USER_NUM, EMB_DIM, lamda=0.1 / BATCH_SIZE, param=None, initdelta=INIT_DELTA,
-                        learning_rate=0.001)
+    param = pickle.load(open(workdir + "model_dns.pkl", "rb"), encoding='latin1')
+    generator = GEN(ITEM_NUM, USER_NUM, EMB_DIM, lamda=0.001 / BATCH_SIZE, param=param, initdelta=INIT_DELTA,
+                    learning_rate=0.1)
+    discriminator = DIS(ITEM_NUM, USER_NUM, EMB_DIM, lamda=0.001 / BATCH_SIZE, param=None, initdelta=INIT_DELTA,
+                        learning_rate=0.1)
 
     config = tf.ConfigProto()
     config.gpu_options.allow_growth = True
@@ -183,7 +189,7 @@ def main():
     best = 0.
     for epoch in range(15):
         if epoch >= 0:
-            for d_epoch in range(100):
+            for d_epoch in range(10):
                 if d_epoch % 5 == 0:
                     generate_for_d(sess, generator, DIS_TRAIN_FILE)
                     train_size = ut.file_len(DIS_TRAIN_FILE)
@@ -203,14 +209,15 @@ def main():
                                             discriminator.label: input_label})
 
             # Train G
-            for g_epoch in range(50):  # 50
+            for g_epoch in range(5):  # 50
                 for u in user_pos_train:
                     sample_lambda = 0.2
                     pos = user_pos_train[u]
 
                     rating = sess.run(generator.all_logits, {generator.u: u})
-                    exp_rating = np.exp(rating)
+                    exp_rating = expit(rating)
                     prob = exp_rating / np.sum(exp_rating)  # prob is generator distribution p_\theta
+                    # print(prob)
 
                     pn = (1 - sample_lambda) * prob
                     pn[pos] += sample_lambda * 1.0 / len(pos)
@@ -244,8 +251,8 @@ def main():
     gen_log.close()
     dis_log.close()
     # save predictions
-    users = np.arange(n_users)
-    predictions = generator.predict(users, None)
+    # users = np.arange(n_users)
+    predictions = generator.predict()
     pd.DataFrame(predictions).to_csv("{}/predictions.csv".format(d), index=False)
     # pd.DataFrame(dataset.train_matrix.toarray()).to_csv("{}/train.csv".format(d), index=False)
     # pd.DataFrame(dataset.test_matrix.toarray()).to_csv("{}/test.csv".format(d), index=False)
